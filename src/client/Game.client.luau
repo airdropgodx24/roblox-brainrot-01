@@ -1,258 +1,262 @@
--- Brainrot Obby Rush - client HUD
--- Shows the run timer, the current stage and the brainrot tally for the
--- local player, and reacts to the collect and win remotes from the server.
+--!strict
+--[[
+	Brainrot Obby Rush - client HUD
+
+	Builds the heads-up display for one player: a stopwatch, a brainrot
+	counter and a stage tracker across the top of the screen, plus a
+	celebration banner when the run is won. The server owns the run and
+	mirrors it onto the player as attributes (Stage, Collected, Won and
+	StartTime), with the final time also published in leaderstats as
+	"Time", which the banner prefers when present. Two RemoteEvents sit
+	directly in ReplicatedStorage (no folder): BrainrotCollect, fired on
+	a pickup, and BrainrotWin, fired at the podium. The collect event
+	only drives a flash on the counter; the numbers always come from
+	the attributes, so a missed event cannot leave the HUD out of step.
+]]
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
-local TweenService = game:GetService("TweenService")
 
 local TOTAL_STAGES = 12
 local TOTAL_BRAINROTS = 10
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
+-- The two remotes live directly under ReplicatedStorage.
+local collectEvent = ReplicatedStorage:WaitForChild("BrainrotCollect") :: RemoteEvent
+local winEvent = ReplicatedStorage:WaitForChild("BrainrotWin") :: RemoteEvent
 
--- Wait for the shared remotes the server creates at startup.
-local collectEvent = ReplicatedStorage:WaitForChild("BrainrotCollect")
-local winEvent = ReplicatedStorage:WaitForChild("BrainrotWin")
+-- Small helpers
 
-local function formatTime(seconds)
-	seconds = math.max(0, math.floor(seconds))
+-- Turn a count of seconds into "m:ss.t" (tenths keep the finish lively).
+local function formatTime(seconds: number): string
+	if seconds < 0 then
+		seconds = 0
+	end
 	local minutes = math.floor(seconds / 60)
-	local rest = seconds % 60
-	return string.format("%02d:%02d", minutes, rest)
+	local rest = seconds - minutes * 60
+	local whole = math.floor(rest)
+	local tenth = math.floor((rest - whole) * 10)
+	return string.format("%d:%02d.%d", minutes, whole, tenth)
 end
 
-local function makeLabel(parent, name, size, textSize)
-	local label = Instance.new("TextLabel")
-	label.Name = name
-	label.Size = size
-	label.BackgroundTransparency = 0.35
-	label.BackgroundColor3 = Color3.fromRGB(12, 12, 28)
-	label.BorderSizePixel = 0
-	label.Font = Enum.Font.GothamBold
-	label.TextColor3 = Color3.fromRGB(255, 255, 255)
-	label.TextSize = textSize
-	label.Text = ""
-	label.Parent = parent
-
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 8)
-	corner.Parent = label
-
-	return label
+-- Read one attribute as a number, with a fallback while it is unset.
+local function numberAttr(name: string, fallback: number): number
+	local value = player:GetAttribute(name)
+	if typeof(value) == "number" then
+		return value
+	end
+	return fallback
 end
 
--- Root gui ---------------------------------------------------------------
+-- The leaderstats Time value, if the server has published one yet.
+local function leaderstatTime(): number?
+	local stats = player:FindFirstChild("leaderstats")
+	if stats == nil then
+		return nil
+	end
+	local entry = stats:FindFirstChild("Time")
+	if entry ~= nil and (entry:IsA("NumberValue") or entry:IsA("IntValue")) then
+		return entry.Value
+	end
+	return nil
+end
+
+-- Build the interface
+
 local gui = Instance.new("ScreenGui")
 gui.Name = "BrainrotHud"
 gui.ResetOnSpawn = false
 gui.IgnoreGuiInset = false
 gui.DisplayOrder = 10
 gui.Parent = playerGui
-
--- Top bar holding the three readouts.
+-- A slim bar pinned to the top centre of the screen.
 local bar = Instance.new("Frame")
 bar.Name = "TopBar"
-bar.Size = UDim2.new(1, 0, 0, 56)
-bar.Position = UDim2.new(0, 0, 0, 0)
-bar.BackgroundTransparency = 1
+bar.AnchorPoint = Vector2.new(0.5, 0)
+bar.Position = UDim2.new(0.5, 0, 0, 10)
+bar.Size = UDim2.new(0, 520, 0, 52)
+bar.BackgroundColor3 = Color3.fromRGB(18, 16, 34)
+bar.BackgroundTransparency = 0.15
+bar.BorderSizePixel = 0
 bar.Parent = gui
+
+local barCorner = Instance.new("UICorner")
+barCorner.CornerRadius = UDim.new(0, 14)
+barCorner.Parent = bar
+
+local barStroke = Instance.new("UIStroke")
+barStroke.Color = Color3.fromRGB(0, 255, 200)
+barStroke.Thickness = 2
+barStroke.Transparency = 0.35
+barStroke.Parent = bar
 
 local layout = Instance.new("UIListLayout")
 layout.FillDirection = Enum.FillDirection.Horizontal
 layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 layout.VerticalAlignment = Enum.VerticalAlignment.Center
-layout.Padding = UDim.new(0, 12)
+layout.Padding = UDim.new(0, 26)
 layout.Parent = bar
 
-local timerLabel = makeLabel(bar, "Timer", UDim2.new(0, 150, 0, 44), 22)
-timerLabel.Text = "00:00"
+-- One labelled readout inside the bar.
+local function makeReadout(name: string, firstText: string): TextLabel
+	local label = Instance.new("TextLabel")
+	label.Name = name
+	label.AutomaticSize = Enum.AutomaticSize.X
+	label.Size = UDim2.new(0, 0, 1, 0)
+	label.BackgroundTransparency = 1
+	label.Font = Enum.Font.GothamBold
+	label.TextSize = 22
+	label.TextColor3 = Color3.fromRGB(240, 244, 255)
+	label.Text = firstText
+	label.Parent = bar
+	return label
+end
 
-local stageLabel = makeLabel(bar, "Stage", UDim2.new(0, 150, 0, 44), 22)
-stageLabel.Text = "Stage: 1/" .. TOTAL_STAGES
+local timerLabel = makeReadout("Timer", "0:00.0")
+local brainrotLabel = makeReadout("Brainrots", "Brainrots: 0/" .. TOTAL_BRAINROTS)
+local stageLabel = makeReadout("Stage", "Stage: 1/" .. TOTAL_STAGES)
 
-local brainrotLabel = makeLabel(bar, "Brainrots", UDim2.new(0, 190, 0, 44), 22)
-brainrotLabel.Text = "Brainrots: 0/" .. TOTAL_BRAINROTS
-brainrotLabel.TextColor3 = Color3.fromRGB(120, 255, 170)
-
--- Centre banner, hidden until the win remote fires.
+brainrotLabel.TextColor3 = Color3.fromRGB(255, 214, 90)
+stageLabel.TextColor3 = Color3.fromRGB(120, 220, 255)
+-- The win banner starts hidden in the middle of the screen.
 local banner = Instance.new("Frame")
 banner.Name = "WinBanner"
-banner.Size = UDim2.new(0, 460, 0, 180)
-banner.Position = UDim2.new(0.5, -230, 0.5, -90)
-banner.BackgroundColor3 = Color3.fromRGB(20, 16, 48)
-banner.BackgroundTransparency = 0.1
+banner.AnchorPoint = Vector2.new(0.5, 0.5)
+banner.Position = UDim2.new(0.5, 0, 0.42, 0)
+banner.Size = UDim2.new(0, 560, 0, 190)
+banner.BackgroundColor3 = Color3.fromRGB(24, 20, 48)
+banner.BackgroundTransparency = 0.08
 banner.BorderSizePixel = 0
 banner.Visible = false
 banner.Parent = gui
 
 local bannerCorner = Instance.new("UICorner")
-bannerCorner.CornerRadius = UDim.new(0, 16)
+bannerCorner.CornerRadius = UDim.new(0, 20)
 bannerCorner.Parent = banner
+
+local bannerStroke = Instance.new("UIStroke")
+bannerStroke.Color = Color3.fromRGB(255, 214, 90)
+bannerStroke.Thickness = 3
+bannerStroke.Parent = banner
+
+local bannerLayout = Instance.new("UIListLayout")
+bannerLayout.FillDirection = Enum.FillDirection.Vertical
+bannerLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+bannerLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+bannerLayout.Padding = UDim.new(0, 8)
+bannerLayout.Parent = banner
 
 local bannerTitle = Instance.new("TextLabel")
 bannerTitle.Name = "Title"
-bannerTitle.Size = UDim2.new(1, 0, 0, 60)
-bannerTitle.Position = UDim2.new(0, 0, 0, 16)
+bannerTitle.AutomaticSize = Enum.AutomaticSize.XY
 bannerTitle.BackgroundTransparency = 1
 bannerTitle.Font = Enum.Font.GothamBlack
-bannerTitle.TextSize = 36
-bannerTitle.TextColor3 = Color3.fromRGB(255, 215, 90)
-bannerTitle.Text = "You Win!"
+bannerTitle.TextSize = 44
+bannerTitle.TextColor3 = Color3.fromRGB(255, 214, 90)
+bannerTitle.Text = "YOU WIN!"
 bannerTitle.Parent = banner
 
 local bannerDetail = Instance.new("TextLabel")
 bannerDetail.Name = "Detail"
-bannerDetail.Size = UDim2.new(1, -32, 0, 80)
-bannerDetail.Position = UDim2.new(0, 16, 0, 84)
+bannerDetail.AutomaticSize = Enum.AutomaticSize.XY
 bannerDetail.BackgroundTransparency = 1
 bannerDetail.Font = Enum.Font.Gotham
-bannerDetail.TextSize = 22
-bannerDetail.TextColor3 = Color3.fromRGB(235, 235, 255)
-bannerDetail.TextWrapped = true
+bannerDetail.TextSize = 24
+bannerDetail.TextColor3 = Color3.fromRGB(240, 244, 255)
 bannerDetail.Text = ""
 bannerDetail.Parent = banner
+-- Refresh logic
 
--- Small hint along the bottom so new players know the goal.
-local hint = Instance.new("TextLabel")
-hint.Name = "Hint"
-hint.Size = UDim2.new(1, 0, 0, 28)
-hint.Position = UDim2.new(0, 0, 1, -34)
-hint.BackgroundTransparency = 1
-hint.Font = Enum.Font.Gotham
-hint.TextSize = 16
-hint.TextColor3 = Color3.fromRGB(200, 200, 220)
-hint.Text = "Clear all 12 stages and hunt down the 10 hidden brainrots!"
-hint.Parent = gui
-
--- State readers ----------------------------------------------------------
-local function currentStage()
-	local stage = player:GetAttribute("Stage")
-	if typeof(stage) ~= "number" then
-		return 1
-	end
-	return math.clamp(math.floor(stage), 1, TOTAL_STAGES)
+local function refreshCounters()
+	local stage = math.clamp(math.floor(numberAttr("Stage", 1)), 1, TOTAL_STAGES)
+	local found = math.clamp(math.floor(numberAttr("Collected", 0)), 0, TOTAL_BRAINROTS)
+	stageLabel.Text = string.format("Stage: %d/%d", stage, TOTAL_STAGES)
+	brainrotLabel.Text = string.format("Brainrots: %d/%d", found, TOTAL_BRAINROTS)
 end
 
-local function currentCollected()
-	local collected = player:GetAttribute("Collected")
-	if typeof(collected) ~= "number" then
-		return 0
-	end
-	return math.clamp(math.floor(collected), 0, TOTAL_BRAINROTS)
+local function showBanner(finishSeconds: number)
+	local found = math.clamp(math.floor(numberAttr("Collected", 0)), 0, TOTAL_BRAINROTS)
+	bannerDetail.Text = string.format(
+		"Finished in %s - Brainrots found: %d/%d",
+		formatTime(finishSeconds),
+		found,
+		TOTAL_BRAINROTS
+	)
+	banner.Visible = true
 end
 
-local function hasWon()
-	return player:GetAttribute("Won") == true
-end
-
-local function elapsedSeconds()
-	local startTime = player:GetAttribute("StartTime")
-	if typeof(startTime) ~= "number" then
-		return 0
-	end
-	return math.max(0, os.clock() - startTime)
-end
-
-local function leaderstatTime()
-	local stats = player:FindFirstChild("leaderstats")
-	if not stats then
+-- Seconds on the clock right now, or nil while no run is in progress.
+local function elapsedNow(): number?
+	local start = player:GetAttribute("StartTime")
+	if typeof(start) ~= "number" then
 		return nil
 	end
-	local timeValue = stats:FindFirstChild("Time")
-	if timeValue and timeValue:IsA("NumberValue") then
-		return timeValue.Value
-	end
-	if timeValue and timeValue:IsA("IntValue") then
-		return timeValue.Value
-	end
-	return nil
+	return os.clock() - start
 end
 
-local function refreshCounts()
-	stageLabel.Text = "Stage: " .. currentStage() .. "/" .. TOTAL_STAGES
-	brainrotLabel.Text = "Brainrots: " .. currentCollected() .. "/" .. TOTAL_BRAINROTS
-end
+-- The stopwatch: one update per rendered frame until the run is won.
+local heartbeat = RunService.RenderStepped:Connect(function()
+	if player:GetAttribute("Won") == true then
+		return
+	end
+	local elapsed = elapsedNow()
+	if elapsed ~= nil then
+		timerLabel.Text = formatTime(elapsed)
+	end
+end)
 
-local function refreshTimer()
-	if hasWon() then
-		local finalTime = leaderstatTime()
-		if finalTime then
-			timerLabel.Text = formatTime(finalTime)
-			return
-		end
-	end
-	timerLabel.Text = formatTime(elapsedSeconds())
-end
+-- React to the server
 
--- Collect feedback: pulse the counter so the pickup feels noticed.
-local flashTween = nil
-local function flashBrainrots()
-	brainrotLabel.TextColor3 = Color3.fromRGB(255, 240, 120)
-	if flashTween then
-		flashTween:Cancel()
+player:GetAttributeChangedSignal("Stage"):Connect(refreshCounters)
+player:GetAttributeChangedSignal("Collected"):Connect(refreshCounters)
+player:GetAttributeChangedSignal("Won"):Connect(function()
+	if player:GetAttribute("Won") == true then
+		local final = leaderstatTime() or elapsedNow() or 0
+		timerLabel.Text = formatTime(final)
+		showBanner(final)
 	end
-	local info = TweenInfo.new(0.45, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-	flashTween = TweenService:Create(brainrotLabel, info, {
-		TextColor3 = Color3.fromRGB(120, 255, 170),
-	})
-	flashTween:Play()
-	refreshCounts()
-end
+end)
 
--- Win presentation -------------------------------------------------------
-local function showWin(finishTime, found)
-	local shownTime = finishTime
-	if typeof(shownTime) ~= "number" then
-		shownTime = elapsedSeconds()
+-- A pickup makes the counter pop: swell, tint, then settle back down.
+local flashing = false
+local function flashCounter()
+	if flashing then
+		return
 	end
-	local shownFound = found
-	if typeof(shownFound) ~= "number" then
-		shownFound = currentCollected()
-	end
-	bannerDetail.Text = "Finish time: "
-		.. formatTime(shownTime)
-		.. "\nBrainrots found: "
-		.. math.floor(shownFound)
-		.. "/"
-		.. TOTAL_BRAINROTS
-	banner.Visible = true
-	refreshCounts()
-	refreshTimer()
+	flashing = true
+	local baseSize = brainrotLabel.TextSize
+	local baseColour = brainrotLabel.TextColor3
+	brainrotLabel.TextSize = baseSize + 8
+	brainrotLabel.TextColor3 = Color3.fromRGB(140, 255, 170)
+	task.wait(0.12)
+	brainrotLabel.TextSize = baseSize
+	task.wait(0.12)
+	brainrotLabel.TextColor3 = baseColour
+	flashing = false
 end
 
 collectEvent.OnClientEvent:Connect(function()
-	flashBrainrots()
+	refreshCounters()
+	task.spawn(flashCounter)
 end)
-
-winEvent.OnClientEvent:Connect(function(finishTime, found)
-	showWin(finishTime, found)
-end)
-
--- Attribute changes keep the readouts honest between remote events.
-player:GetAttributeChangedSignal("Stage"):Connect(refreshCounts)
-player:GetAttributeChangedSignal("Collected"):Connect(refreshCounts)
-player:GetAttributeChangedSignal("Won"):Connect(function()
-	refreshTimer()
-	if hasWon() and not banner.Visible then
-		showWin(leaderstatTime(), currentCollected())
+winEvent.OnClientEvent:Connect(function(finalTime)
+	local finish = finalTime
+	if typeof(finish) ~= "number" then
+		finish = leaderstatTime() or elapsedNow() or 0
 	end
+	timerLabel.Text = formatTime(finish :: number)
+	showBanner(finish :: number)
 end)
-player:GetAttributeChangedSignal("StartTime"):Connect(refreshTimer)
 
--- If the player already finished before this script loaded, show it.
-if hasWon() then
-	showWin(leaderstatTime(), currentCollected())
+-- If the player already won before this script loaded (a rejoin onto
+-- the podium, say), show the end state straight away. The heartbeat
+-- connection lives for the whole session and is never disconnected.
+refreshCounters()
+if player:GetAttribute("Won") == true then
+	local final = leaderstatTime() or elapsedNow() or 0
+	timerLabel.Text = formatTime(final)
+	showBanner(final)
 end
-
-refreshCounts()
-refreshTimer()
-
--- Per-frame timer tick; keeps counting until the Won attribute lands.
-RunService.RenderStepped:Connect(function()
-	if not hasWon() then
-		refreshTimer()
-	end
-end)
+local _keepAlive = heartbeat
