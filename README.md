@@ -1,21 +1,37 @@
-# roblox-brainrot-01 starter
+[![make.fun · roblox-brainrot-01](https://make.fun/badge/roblox-brainrot-01.svg)](https://make.fun/bounty/roblox-brainrot-01)
+[![rank](https://make.fun/badge/roblox-brainrot-01/airdropgodx24/roblox-brainrot-01/rank.svg)](https://make.fun/bounty/roblox-brainrot-01/leaderboard)
+[![reward](https://make.fun/badge/roblox-brainrot-01/airdropgodx24/roblox-brainrot-01/reward.svg)](https://make.fun/bounty/roblox-brainrot-01)
 
-A working entry for make.fun's "Make the best AI Roblox brainrot game" bounty (roblox-brainrot-01), laid out as your
-repository: a Rojo project whose game is a grey square that moves with the arrow keys. It is a starting point, not a
-winner, and not yet the 3D game the bounty asks for: its square is drawn on the screen, not in Roblox's 3D world.
+# Brainrot Obby Rush
 
-- `main.ts` (Node 22, standard library only) hands the game in: it copies `game.rbxl`, `src/`, `screenshots/` and
-  `PLAY.json` to `/output`, leaving out every name that starts with a dot (such as `.gitkeep` or `.DS_Store`, which
-  fail an entry), and writes `/output/dossier.json` with `vendor/makefun-roblox.ts`, the kit's copy, unchanged.
-- `game.rbxl` is the place Rojo builds from `src/` and `default.project.json`; `screenshots/` holds three captures of
-  it; `PLAY.json` names no place yet, so the gate refuses the starter as it stands until it names your published one.
-- One of your screenshots must also be your game's first thumbnail on Roblox: the same picture, uploaded on the
-  Creator Dashboard with your game's icon.
-- `TOUR.json` is an example of the optional tour: for each screenshot, the keys that bring the game to that screen.
+A 12-stage neon obstacle course for Roblox, built by an AI agent for make.fun's
+[roblox-brainrot-01 bounty](https://make.fun/bounty/roblox-brainrot-01), "Make the best AI Roblox brainrot game".
 
-Run it as the grader does, writing `out/` in place of `/output`:
+Race a course that the scripts generate at runtime: every stage is a different loud colour with its own
+gimmick (jumps, narrow beams, stairs, lava floors, moving platforms, spinner kill bars, zigzags and wall
+hops). Ten original blocky brainrot characters hide in side alcoves along the way. Glowing checkpoint pads
+save your progress, the HUD tracks your timer, Brainrots found and stage reached, and the run ends on a
+gold confetti podium.
 
-    mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
+Play it here: https://www.roblox.com/games/138570078055403
 
-The rules are on the bounty's page (/bounty/roblox-brainrot-01) and in the kit's RULES.txt,
-which gives every command in order (Before you submit, then Enter).
+## Layout
+
+- `src/server/` holds the Luau that builds and runs the course: `Course.luau` generates the 12 stages,
+  `Brainrots.luau` places the 10 collectibles, and `init.server.luau` handles checkpoints and the win.
+- `src/client/Game.client.luau` is the HUD: timer, Brainrots n/10, Stage n/12 and the win banner.
+- `game.rbxl` is the place Rojo builds from `src/` and `default.project.json`.
+- `screenshots/` holds three captures of the published game; the first is also the game's Roblox thumbnail.
+- `PLAY.json` names the published experience (place and universe) this entry plays as.
+- `main.ts` (Node 22, standard library only) hands the entry in: it validates the pieces, copies them to
+  the output directory and writes the dossier the grader reads.
+
+## Run the hand-in
+
+```
+mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
+```
+
+## License
+
+MIT, see `LICENSE`.
