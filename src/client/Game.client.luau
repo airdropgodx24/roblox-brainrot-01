@@ -1,233 +1,258 @@
 -- Brainrot Obby Rush - client HUD
--- Top bar with timer / brainrot count / stage, a fading title banner, a
--- collect toast and a win banner. Progress is read from player attributes
--- (Stage, Collected, StartTime) that the server maintains; collect and win
--- arrive over RemoteEvents. Collecting also hides that brainrot locally so
--- collection feels per-player.
+-- Shows the run timer, the current stage and the brainrot tally for the
+-- local player, and reacts to the collect and win remotes from the server.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
-local Workspace = game:GetService("Workspace")
+
+local TOTAL_STAGES = 12
+local TOTAL_BRAINROTS = 10
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
-local TOTAL_BRAINROTS = 10
-local TOTAL_STAGES = 12
+-- Wait for the shared remotes the server creates at startup.
+local collectEvent = ReplicatedStorage:WaitForChild("BrainrotCollect")
+local winEvent = ReplicatedStorage:WaitForChild("BrainrotWin")
 
 local function formatTime(seconds)
 	seconds = math.max(0, math.floor(seconds))
-	return string.format("%d:%02d", math.floor(seconds / 60), seconds % 60)
+	local minutes = math.floor(seconds / 60)
+	local rest = seconds % 60
+	return string.format("%02d:%02d", minutes, rest)
 end
 
-local gui = Instance.new("ScreenGui")
-gui.Name = "ObbyGui"
-gui.ResetOnSpawn = false
-gui.Parent = playerGui
-
--- Top bar ----------------------------------------------------------------------
-local bar = Instance.new("Frame")
-bar.Name = "TopBar"
-bar.AnchorPoint = Vector2.new(0.5, 0)
-bar.Position = UDim2.new(0.5, 0, 0, 10)
-bar.Size = UDim2.new(0, 540, 0, 46)
-bar.BackgroundColor3 = Color3.fromRGB(20, 20, 35)
-bar.BackgroundTransparency = 0.25
-bar.BorderSizePixel = 0
-bar.Parent = gui
-local barCorner = Instance.new("UICorner")
-barCorner.CornerRadius = UDim.new(0, 12)
-barCorner.Parent = bar
-
-local function makeBarLabel(name, text, xScale, width)
+local function makeLabel(parent, name, size, textSize)
 	local label = Instance.new("TextLabel")
 	label.Name = name
-	label.AnchorPoint = Vector2.new(0.5, 0.5)
-	label.Position = UDim2.new(xScale, 0, 0.5, 0)
-	label.Size = UDim2.new(0, width, 1, 0)
-	label.BackgroundTransparency = 1
+	label.Size = size
+	label.BackgroundTransparency = 0.35
+	label.BackgroundColor3 = Color3.fromRGB(12, 12, 28)
+	label.BorderSizePixel = 0
 	label.Font = Enum.Font.GothamBold
-	label.TextSize = 22
 	label.TextColor3 = Color3.fromRGB(255, 255, 255)
-	label.Text = text
-	label.Parent = bar
+	label.TextSize = textSize
+	label.Text = ""
+	label.Parent = parent
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 8)
+	corner.Parent = label
+
 	return label
 end
 
-local timerLabel = makeBarLabel("Timer", "Time 0:00", 0.17, 160)
-local brainrotLabel = makeBarLabel("Brainrots", "Brainrots: 0/" .. TOTAL_BRAINROTS, 0.5, 190)
-local stageLabel = makeBarLabel("Stage", "Stage: 1/" .. TOTAL_STAGES, 0.84, 150)
+-- Root gui ---------------------------------------------------------------
+local gui = Instance.new("ScreenGui")
+gui.Name = "BrainrotHud"
+gui.ResetOnSpawn = false
+gui.IgnoreGuiInset = false
+gui.DisplayOrder = 10
+gui.Parent = playerGui
 
--- Title banner -------------------------------------------------------------------
-local titleFrame = Instance.new("Frame")
-titleFrame.Name = "TitleBanner"
-titleFrame.AnchorPoint = Vector2.new(0.5, 0)
-titleFrame.Position = UDim2.new(0.5, 0, 0.16, 0)
-titleFrame.Size = UDim2.new(0, 760, 0, 118)
-titleFrame.BackgroundColor3 = Color3.fromRGB(25, 18, 50)
-titleFrame.BackgroundTransparency = 0.3
-titleFrame.BorderSizePixel = 0
-titleFrame.Parent = gui
-local titleCorner = Instance.new("UICorner")
-titleCorner.CornerRadius = UDim.new(0, 16)
-titleCorner.Parent = titleFrame
+-- Top bar holding the three readouts.
+local bar = Instance.new("Frame")
+bar.Name = "TopBar"
+bar.Size = UDim2.new(1, 0, 0, 56)
+bar.Position = UDim2.new(0, 0, 0, 0)
+bar.BackgroundTransparency = 1
+bar.Parent = gui
 
-local titleLabel = Instance.new("TextLabel")
-titleLabel.Name = "Title"
-titleLabel.Size = UDim2.new(1, 0, 0.58, 0)
-titleLabel.Position = UDim2.new(0, 0, 0.04, 0)
-titleLabel.BackgroundTransparency = 1
-titleLabel.Font = Enum.Font.GothamBold
-titleLabel.TextSize = 42
-titleLabel.TextColor3 = Color3.fromRGB(255, 220, 60)
-titleLabel.Text = "BRAINROT OBBY RUSH"
-titleLabel.Parent = titleFrame
+local layout = Instance.new("UIListLayout")
+layout.FillDirection = Enum.FillDirection.Horizontal
+layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+layout.VerticalAlignment = Enum.VerticalAlignment.Center
+layout.Padding = UDim.new(0, 12)
+layout.Parent = bar
 
-local subLabel = Instance.new("TextLabel")
-subLabel.Name = "Sub"
-subLabel.Size = UDim2.new(1, 0, 0.34, 0)
-subLabel.Position = UDim2.new(0, 0, 0.62, 0)
-subLabel.BackgroundTransparency = 1
-subLabel.Font = Enum.Font.GothamBold
-subLabel.TextSize = 22
-subLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-subLabel.Text = "Collect all 10 brainrots, reach the podium!"
-subLabel.Parent = titleFrame
+local timerLabel = makeLabel(bar, "Timer", UDim2.new(0, 150, 0, 44), 22)
+timerLabel.Text = "00:00"
 
-task.spawn(function()
-	task.wait(6)
-	local fadeInfo = TweenInfo.new(1)
-	TweenService:Create(titleFrame, fadeInfo, { BackgroundTransparency = 1 }):Play()
-	TweenService:Create(titleLabel, fadeInfo, { TextTransparency = 1 }):Play()
-	local last = TweenService:Create(subLabel, fadeInfo, { TextTransparency = 1 })
-	last:Play()
-	last.Completed:Connect(function()
-		titleFrame.Visible = false
-	end)
-end)
+local stageLabel = makeLabel(bar, "Stage", UDim2.new(0, 150, 0, 44), 22)
+stageLabel.Text = "Stage: 1/" .. TOTAL_STAGES
 
--- Collect toast ------------------------------------------------------------------
-local toast = Instance.new("TextLabel")
-toast.Name = "CollectToast"
-toast.AnchorPoint = Vector2.new(0.5, 0.5)
-toast.Position = UDim2.new(0.5, 0, 0.38, 0)
-toast.Size = UDim2.new(0, 420, 0, 56)
-toast.BackgroundColor3 = Color3.fromRGB(20, 20, 35)
-toast.BackgroundTransparency = 1
-toast.BorderSizePixel = 0
-toast.Font = Enum.Font.GothamBold
-toast.TextSize = 30
-toast.TextColor3 = Color3.fromRGB(120, 255, 140)
-toast.TextTransparency = 1
-toast.Text = ""
-toast.Parent = gui
-local toastCorner = Instance.new("UICorner")
-toastCorner.CornerRadius = UDim.new(0, 12)
-toastCorner.Parent = toast
+local brainrotLabel = makeLabel(bar, "Brainrots", UDim2.new(0, 190, 0, 44), 22)
+brainrotLabel.Text = "Brainrots: 0/" .. TOTAL_BRAINROTS
+brainrotLabel.TextColor3 = Color3.fromRGB(120, 255, 170)
 
-local toastGeneration = 0
-local function showToast(text)
-	toastGeneration += 1
-	local generation = toastGeneration
-	toast.Text = text
-	toast.TextTransparency = 0
-	toast.BackgroundTransparency = 0.3
-	task.spawn(function()
-		task.wait(1.6)
-		if generation ~= toastGeneration then
+-- Centre banner, hidden until the win remote fires.
+local banner = Instance.new("Frame")
+banner.Name = "WinBanner"
+banner.Size = UDim2.new(0, 460, 0, 180)
+banner.Position = UDim2.new(0.5, -230, 0.5, -90)
+banner.BackgroundColor3 = Color3.fromRGB(20, 16, 48)
+banner.BackgroundTransparency = 0.1
+banner.BorderSizePixel = 0
+banner.Visible = false
+banner.Parent = gui
+
+local bannerCorner = Instance.new("UICorner")
+bannerCorner.CornerRadius = UDim.new(0, 16)
+bannerCorner.Parent = banner
+
+local bannerTitle = Instance.new("TextLabel")
+bannerTitle.Name = "Title"
+bannerTitle.Size = UDim2.new(1, 0, 0, 60)
+bannerTitle.Position = UDim2.new(0, 0, 0, 16)
+bannerTitle.BackgroundTransparency = 1
+bannerTitle.Font = Enum.Font.GothamBlack
+bannerTitle.TextSize = 36
+bannerTitle.TextColor3 = Color3.fromRGB(255, 215, 90)
+bannerTitle.Text = "You Win!"
+bannerTitle.Parent = banner
+
+local bannerDetail = Instance.new("TextLabel")
+bannerDetail.Name = "Detail"
+bannerDetail.Size = UDim2.new(1, -32, 0, 80)
+bannerDetail.Position = UDim2.new(0, 16, 0, 84)
+bannerDetail.BackgroundTransparency = 1
+bannerDetail.Font = Enum.Font.Gotham
+bannerDetail.TextSize = 22
+bannerDetail.TextColor3 = Color3.fromRGB(235, 235, 255)
+bannerDetail.TextWrapped = true
+bannerDetail.Text = ""
+bannerDetail.Parent = banner
+
+-- Small hint along the bottom so new players know the goal.
+local hint = Instance.new("TextLabel")
+hint.Name = "Hint"
+hint.Size = UDim2.new(1, 0, 0, 28)
+hint.Position = UDim2.new(0, 0, 1, -34)
+hint.BackgroundTransparency = 1
+hint.Font = Enum.Font.Gotham
+hint.TextSize = 16
+hint.TextColor3 = Color3.fromRGB(200, 200, 220)
+hint.Text = "Clear all 12 stages and hunt down the 10 hidden brainrots!"
+hint.Parent = gui
+
+-- State readers ----------------------------------------------------------
+local function currentStage()
+	local stage = player:GetAttribute("Stage")
+	if typeof(stage) ~= "number" then
+		return 1
+	end
+	return math.clamp(math.floor(stage), 1, TOTAL_STAGES)
+end
+
+local function currentCollected()
+	local collected = player:GetAttribute("Collected")
+	if typeof(collected) ~= "number" then
+		return 0
+	end
+	return math.clamp(math.floor(collected), 0, TOTAL_BRAINROTS)
+end
+
+local function hasWon()
+	return player:GetAttribute("Won") == true
+end
+
+local function elapsedSeconds()
+	local startTime = player:GetAttribute("StartTime")
+	if typeof(startTime) ~= "number" then
+		return 0
+	end
+	return math.max(0, os.clock() - startTime)
+end
+
+local function leaderstatTime()
+	local stats = player:FindFirstChild("leaderstats")
+	if not stats then
+		return nil
+	end
+	local timeValue = stats:FindFirstChild("Time")
+	if timeValue and timeValue:IsA("NumberValue") then
+		return timeValue.Value
+	end
+	if timeValue and timeValue:IsA("IntValue") then
+		return timeValue.Value
+	end
+	return nil
+end
+
+local function refreshCounts()
+	stageLabel.Text = "Stage: " .. currentStage() .. "/" .. TOTAL_STAGES
+	brainrotLabel.Text = "Brainrots: " .. currentCollected() .. "/" .. TOTAL_BRAINROTS
+end
+
+local function refreshTimer()
+	if hasWon() then
+		local finalTime = leaderstatTime()
+		if finalTime then
+			timerLabel.Text = formatTime(finalTime)
 			return
 		end
-		local fadeInfo = TweenInfo.new(0.5)
-		TweenService:Create(toast, fadeInfo, { TextTransparency = 1, BackgroundTransparency = 1 }):Play()
-	end)
+	end
+	timerLabel.Text = formatTime(elapsedSeconds())
 end
 
--- Win banner ---------------------------------------------------------------------
-local winFrame = Instance.new("Frame")
-winFrame.Name = "WinBanner"
-winFrame.AnchorPoint = Vector2.new(0.5, 0.5)
-winFrame.Position = UDim2.new(0.5, 0, 0.4, 0)
-winFrame.Size = UDim2.new(0, 720, 0, 170)
-winFrame.BackgroundColor3 = Color3.fromRGB(50, 38, 0)
-winFrame.BackgroundTransparency = 0.2
-winFrame.BorderSizePixel = 0
-winFrame.Visible = false
-winFrame.Parent = gui
-local winCorner = Instance.new("UICorner")
-winCorner.CornerRadius = UDim.new(0, 16)
-winCorner.Parent = winFrame
-
-local winLabel = Instance.new("TextLabel")
-winLabel.Name = "WinText"
-winLabel.Size = UDim2.new(1, -20, 0.72, 0)
-winLabel.Position = UDim2.new(0, 10, 0.04, 0)
-winLabel.BackgroundTransparency = 1
-winLabel.Font = Enum.Font.GothamBold
-winLabel.TextSize = 40
-winLabel.TextColor3 = Color3.fromRGB(255, 220, 60)
-winLabel.Text = ""
-winLabel.Parent = winFrame
-
-local winSub = Instance.new("TextLabel")
-winSub.Name = "WinSub"
-winSub.Size = UDim2.new(1, -20, 0.24, 0)
-winSub.Position = UDim2.new(0, 10, 0.74, 0)
-winSub.BackgroundTransparency = 1
-winSub.Font = Enum.Font.GothamBold
-winSub.TextSize = 20
-winSub.TextColor3 = Color3.fromRGB(255, 255, 255)
-winSub.Text = "You can keep exploring, or reset your character to run it again."
-winSub.Parent = winFrame
-
--- Live HUD updates -----------------------------------------------------------------
-local wonTime = nil
-
-local function refreshStats()
-	brainrotLabel.Text = "Brainrots: " .. tostring(player:GetAttribute("Collected") or 0) .. "/" .. TOTAL_BRAINROTS
-	stageLabel.Text = "Stage: " .. tostring(player:GetAttribute("Stage") or 1) .. "/" .. TOTAL_STAGES
+-- Collect feedback: pulse the counter so the pickup feels noticed.
+local flashTween = nil
+local function flashBrainrots()
+	brainrotLabel.TextColor3 = Color3.fromRGB(255, 240, 120)
+	if flashTween then
+		flashTween:Cancel()
+	end
+	local info = TweenInfo.new(0.45, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+	flashTween = TweenService:Create(brainrotLabel, info, {
+		TextColor3 = Color3.fromRGB(120, 255, 170),
+	})
+	flashTween:Play()
+	refreshCounts()
 end
-player:GetAttributeChangedSignal("Collected"):Connect(refreshStats)
-player:GetAttributeChangedSignal("Stage"):Connect(refreshStats)
-refreshStats()
 
-task.spawn(function()
-	while true do
-		task.wait(0.1)
-		local startTime = player:GetAttribute("StartTime")
-		if startTime then
-			local elapsed = Workspace:GetServerTimeNow() - startTime
-			if wonTime then
-				elapsed = wonTime
-			end
-			timerLabel.Text = "Time " .. formatTime(elapsed)
-		end
+-- Win presentation -------------------------------------------------------
+local function showWin(finishTime, found)
+	local shownTime = finishTime
+	if typeof(shownTime) ~= "number" then
+		shownTime = elapsedSeconds()
 	end
+	local shownFound = found
+	if typeof(shownFound) ~= "number" then
+		shownFound = currentCollected()
+	end
+	bannerDetail.Text = "Finish time: "
+		.. formatTime(shownTime)
+		.. "\nBrainrots found: "
+		.. math.floor(shownFound)
+		.. "/"
+		.. TOTAL_BRAINROTS
+	banner.Visible = true
+	refreshCounts()
+	refreshTimer()
+end
+
+collectEvent.OnClientEvent:Connect(function()
+	flashBrainrots()
 end)
 
--- Server events --------------------------------------------------------------------
-local collectEvent = ReplicatedStorage:WaitForChild("BrainrotCollect")
-collectEvent.OnClientEvent:Connect(function(index, count)
-	-- Hide this brainrot for this player only.
-	local folder = Workspace:FindFirstChild("Brainrots")
-	if folder then
-		local model = folder:FindFirstChild("Brainrot" .. index)
-		if model then
-			for _, descendant in ipairs(model:GetDescendants()) do
-				if descendant:IsA("BasePart") then
-					descendant.Transparency = 1
-				elseif descendant:IsA("BillboardGui") then
-					descendant.Enabled = false
-				end
-			end
-		end
-	end
-	showToast("+1 Brainrot! (" .. count .. "/" .. TOTAL_BRAINROTS .. ")")
+winEvent.OnClientEvent:Connect(function(finishTime, found)
+	showWin(finishTime, found)
 end)
 
-local winEvent = ReplicatedStorage:WaitForChild("BrainrotWin")
-winEvent.OnClientEvent:Connect(function(finishTime, count)
-	wonTime = finishTime
-	winLabel.Text = "YOU WIN!  Time: " .. formatTime(finishTime) .. "  -  Brainrots: " .. count .. "/" .. TOTAL_BRAINROTS
-	winFrame.Visible = true
+-- Attribute changes keep the readouts honest between remote events.
+player:GetAttributeChangedSignal("Stage"):Connect(refreshCounts)
+player:GetAttributeChangedSignal("Collected"):Connect(refreshCounts)
+player:GetAttributeChangedSignal("Won"):Connect(function()
+	refreshTimer()
+	if hasWon() and not banner.Visible then
+		showWin(leaderstatTime(), currentCollected())
+	end
+end)
+player:GetAttributeChangedSignal("StartTime"):Connect(refreshTimer)
+
+-- If the player already finished before this script loaded, show it.
+if hasWon() then
+	showWin(leaderstatTime(), currentCollected())
+end
+
+refreshCounts()
+refreshTimer()
+
+-- Per-frame timer tick; keeps counting until the Won attribute lands.
+RunService.RenderStepped:Connect(function()
+	if not hasWon() then
+		refreshTimer()
+	end
 end)

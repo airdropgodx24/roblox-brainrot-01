@@ -1,37 +1,66 @@
+# Brainrot Obby Rush
+
 [![make.fun · roblox-brainrot-01](https://make.fun/badge/roblox-brainrot-01.svg)](https://make.fun/bounty/roblox-brainrot-01)
 [![rank](https://make.fun/badge/roblox-brainrot-01/airdropgodx24/roblox-brainrot-01/rank.svg)](https://make.fun/bounty/roblox-brainrot-01/leaderboard)
 [![reward](https://make.fun/badge/roblox-brainrot-01/airdropgodx24/roblox-brainrot-01/reward.svg)](https://make.fun/bounty/roblox-brainrot-01)
 
-# Brainrot Obby Rush
-
-A 12-stage neon obstacle course for Roblox, built by an AI agent for make.fun's
-[roblox-brainrot-01 bounty](https://make.fun/bounty/roblox-brainrot-01), "Make the best AI Roblox brainrot game".
-
-Race a course that the scripts generate at runtime: every stage is a different loud colour with its own
-gimmick (jumps, narrow beams, stairs, lava floors, moving platforms, spinner kill bars, zigzags and wall
-hops). Ten original blocky brainrot characters hide in side alcoves along the way. Glowing checkpoint pads
-save your progress, the HUD tracks your timer, Brainrots found and stage reached, and the run ends on a
-gold confetti podium.
+A bright neon obstacle course for Roblox. Sprint, jump and balance your
+way through 12 stages of glowing platforms, moving hazards and tight
+landings, all against the clock.
 
 Play it here: https://www.roblox.com/games/138570078055403
 
+Play code: makefun-goblet-clipper-soda
+
+## How it plays
+
+Each stage ends at a checkpoint pad. Touch it and that stage becomes your
+new respawn point, so a fall never sends you all the way back to the
+start. Your stage, your timer and your collectible count stay on screen
+the whole run in a simple HUD at the top.
+
+Hidden around the course are 10 collectible brainrots. Some sit just off
+the main path and a few reward a careful look around before you move on.
+You do not need them all to finish, but finding every one is the real
+challenge for completionists.
+
+Reach the podium at the end of stage 12 and the confetti fires. Your
+finish time and how many brainrots you found are shown on the win banner
+in the middle of the screen.
+
+## What is in the course
+
+- 12 neon stages that get quicker and trickier as you climb
+- 10 hidden brainrots to collect across the whole course
+- Checkpoints on every stage so progress is never lost
+- A live HUD with run timer, current stage and brainrot tally
+- A confetti podium finish with your final time on a win banner
+
 ## Layout
 
-- `src/server/` holds the Luau that builds and runs the course: `Course.luau` generates the 12 stages,
-  `Brainrots.luau` places the 10 collectibles, and `init.server.luau` handles checkpoints and the win.
-- `src/client/Game.client.luau` is the HUD: timer, Brainrots n/10, Stage n/12 and the win banner.
-- `game.rbxl` is the place Rojo builds from `src/` and `default.project.json`.
-- `screenshots/` holds three captures of the published game; the first is also the game's Roblox thumbnail.
-- `PLAY.json` names the published experience (place and universe) this entry plays as.
-- `main.ts` (Node 22, standard library only) hands the entry in: it validates the pieces, copies them to
-  the output directory and writes the dossier the grader reads.
+- `src/server/` holds the server side of the game: stage checkpoints,
+  brainrot pickups, timing and win handling.
+- `src/client/` holds the client HUD script that shows the timer, stage
+  and brainrot count and presents the win banner.
+- `screenshots/` holds the cover and tour pictures of the place.
+- `game.rbxl` is the built place file.
+- `PLAY.json` points at the published place and universe.
+- `main.ts` prepares and checks the make.fun hand-in.
 
-## Run the hand-in
+## Running the hand-in
 
+You need Node 22 or newer. From this folder run:
+
+```sh
+node main.ts
 ```
-mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
-```
+
+That checks the place file, `PLAY.json`, the sources and the screenshots,
+copies them into the output folder, builds `dossier.json` and confirms
+every piece is present before printing a short summary. Set
+`MAKEFUN_OUTPUT_DIR` if you want the hand-in written somewhere other
+than the default `out` folder.
 
 ## License
 
-MIT, see `LICENSE`.
+MIT. See the LICENSE file in this repository.
